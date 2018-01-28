@@ -1,0 +1,8 @@
+#!/bin/sh
+
+cat << EOF
+---
+config_vars:
+  PATH: $PATH:/app/vendor/bluemix/bin
+EOF
+

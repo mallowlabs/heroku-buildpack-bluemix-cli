@@ -1,0 +1,4 @@
+#!/bin/sh
+
+echo "bluemix-cli"
+exit 0

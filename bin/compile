@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+
+set -e
+
+function message {
+  echo "$1"
+  sync
+}
+
+# https://devcenter.heroku.com/articles/buildpack-api
+export_env_dir() {
+  env_dir=$1
+  message "-----> ENV_DIR is $env_dir"
+  whitelist_regex=${2:-''}
+  blacklist_regex=${3:-'^(PATH|GIT_DIR|CPATH|CPPATH|LD_PRELOAD|LIBRARY_PATH)$'}
+  if [ -d "$env_dir" ]; then
+    for e in $(ls $env_dir); do
+      message "-----> ENV_DIR contains file $e"
+      echo "$e" | grep -E "$whitelist_regex" | grep -qvE "$blacklist_regex" &&
+      export "$e=$(cat $env_dir/$e)"
+      :
+    done
+  fi
+}
+
+BUILD_DIR=$1
+CACHE_DIR=$2
+ENV_DIR=$3
+
+export_env_dir $ENV_DIR
+
+# config
+VERSION="0.6.4"
+
+# package
+FILE_NAME="IBM_Cloud_CLI_${VERSION}_amd64.tar.gz"
+BLUEMIX_CLI_ARCHIVE="https://clis.ng.bluemix.net/download/bluemix-cli/${VERSION}/linux64"
+
+mkdir -p $CACHE_DIR
+if ! [ -e $CACHE_DIR/$FILE_NAME ]; then
+  echo "-----> Fetching Bluemix CLI binaries from ${BLUEMIX_CLI_ARCHIVE}"
+  curl --retry 3 $BLUEMIX_CLI_ARCHIVE -s -L -o $CACHE_DIR/$FILE_NAME
+fi
+
+echo "-----> Installing Bluemix CLI binary"
+tar xzvf $CACHE_DIR/$FILE_NAME
+mkdir -p $BUILD_DIR/vendor/bluemix/bin/cfcli
+cp -f Bluemix_CLI/bin/bluemix  $BUILD_DIR/vendor/bluemix/bin/bluemix
+cp -f Bluemix_CLI/bin/bluemix  $BUILD_DIR/vendor/bluemix/bin/bx
+cp -f Bluemix_CLI/bin/cfcli/cf $BUILD_DIR/vendor/bluemix/bin/cfcli/cf
+chmod +x $BUILD_DIR/vendor/bluemix/bin/bluemix
+chmod +x $BUILD_DIR/vendor/bluemix/bin/bx
+chmod +x $BUILD_DIR/vendor/bluemix/bin/cfcli/cf
+
+# endpoint
+echo "-----> API Endpoint checking"
+if [ -n "${BLUEMIX_API_ENDPOINT}" ]; then
+  $BUILD_DIR/vendor/bluemix/bin/bx api ${BLUEMIX_API_ENDPOINT}
+else
+  echo "       !!!! BLUEMIX_API_ENDPOINT not set"
+  echo "       !!!!   Try heroku config:add BLUEMIX_API_ENDPOINT=https://api.ng.bluemix.net"
+  exit 1
+fi
+
+# login
+echo "-----> API Key checking"
+if [ -n "${BLUEMIX_API_KEY}" ]; then
+  $BUILD_DIR/vendor/bluemix/bin/bx login
+else
+  echo "       !!!! BLUEMIX_API_KEY not set"
+  echo "       !!!!   Try heroku config:add BLUEMIX_API_KEY=<your token>"
+  echo "       !!!!   See https://console.bluemix.net/iam/#/apikeys"
+  exit 1
+fi
+
+# target
+echo "-----> ORG and SPACE checking"
+if [ -n "${BLUEMIX_ORG}" ]; then
+  $BUILD_DIR/vendor/bluemix/bin/bx target -o ${BLUEMIX_ORG} -s ${BLUEMIX_SPACE}
+else
+  echo "       !!!! BLUEMIX_ORG or BLUEMIX_SPACE not set"
+  echo "       !!!!   Try heroku config:add BLUEMIX_ORG=<your organization> BLUEMIX_SPACE=<your space>"
+  exit 1
+fi
+
+echo "-----> .bluemix dir copying"
+cp -R ~/.bluemix $BUILD_DIR/
+
